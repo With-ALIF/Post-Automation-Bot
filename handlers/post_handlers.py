@@ -35,6 +35,20 @@ async def _safely_edit_message(query, text: str, reply_markup=None):
             )
     except Exception as e:
         logger.warning("Message edit notice: %s", sanitize_text(str(e)))
+        try:
+            if query.message and query.message.photo:
+                await query.edit_message_caption(
+                    caption=text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
+                )
+        except Exception:
+            pass
 
 
 @authorized_only

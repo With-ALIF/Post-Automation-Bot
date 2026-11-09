@@ -13,6 +13,55 @@ logger = logging.getLogger(__name__)
 class FacebookService:
     def __init__(self):
         self.session = self._create_resilient_session()
+        self._cached_page_token = None
+
+    def get_effective_page_token(self) -> str:
+        """
+        If the configured token is a User Access Token, automatically resolve
+        it to the specific Page Access Token for Config.FACEBOOK_PAGE_ID.
+        If it's already a Page Access Token, use it directly.
+        """
+        if self._cached_page_token:
+            return self._cached_page_token
+
+        base_token = Config.FACEBOOK_PAGE_ACCESS_TOKEN
+        if not base_token or not Config.FACEBOOK_PAGE_ID:
+            return base_token
+
+        try:
+            # 1. Direct query to /{page_id}?fields=access_token
+            url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}"
+            res = self.session.get(
+                url,
+                params={"fields": "access_token,name", "access_token": base_token},
+                timeout=12
+            )
+            data = res.json()
+            if res.status_code == 200 and "access_token" in data:
+                self._cached_page_token = data["access_token"]
+                logger.info("Successfully auto-resolved Page Access Token for %s", data.get("name", Config.FACEBOOK_PAGE_ID))
+                return self._cached_page_token
+
+            # 2. Query /me/accounts
+            accounts_url = f"{self.base_url}/me/accounts"
+            res2 = self.session.get(
+                accounts_url,
+                params={"access_token": base_token},
+                timeout=12
+            )
+            data2 = res2.json()
+            if res2.status_code == 200 and "data" in data2:
+                for item in data2.get("data", []):
+                    if str(item.get("id")) == str(Config.FACEBOOK_PAGE_ID):
+                        token = item.get("access_token")
+                        if token:
+                            self._cached_page_token = token
+                            logger.info("Successfully resolved Page Access Token from /me/accounts for %s", item.get("name"))
+                            return self._cached_page_token
+        except Exception as e:
+            logger.warning("Could not auto-resolve Page Access Token: %s", sanitize_text(str(e)))
+
+        return base_token
 
     @staticmethod
     def _create_resilient_session() -> requests.Session:
@@ -40,10 +89,11 @@ class FacebookService:
                 "error": "Facebook Page ID অথবা Access Token কনফিগার করা হয়নি (.env চেক করুন)।"
             }
 
+        token = self.get_effective_page_token()
         url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}"
         params = {
             "fields": "id,name,link,is_published",
-            "access_token": Config.FACEBOOK_PAGE_ACCESS_TOKEN
+            "access_token": token
         }
 
         try:
@@ -73,10 +123,11 @@ class FacebookService:
         if not text or not text.strip():
             return {"success": False, "error": "পোস্টের জন্য কোনো টেক্সট দেওয়া হয়নি।"}
 
+        token = self.get_effective_page_token()
         url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}/feed"
         payload = {
             "message": text.strip(),
-            "access_token": Config.FACEBOOK_PAGE_ACCESS_TOKEN
+            "access_token": token
         }
 
         try:
@@ -91,6 +142,7 @@ class FacebookService:
                     "post_url": self._generate_post_url(post_id)
                 }
 
+            self._cached_page_token = None
             error_msg = self._parse_error(data, response.status_code)
             return {"success": False, "error": error_msg}
 
@@ -105,14 +157,16 @@ class FacebookService:
         if not photo_bytes:
             return {"success": False, "error": "কোনো ছবি পাওয়া যায়নি।"}
 
+        token = self.get_effective_page_token()
         url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}/photos"
         files = {
             "source": ("photo.jpg", photo_bytes, "image/jpeg")
         }
         data = {
-            "access_token": Config.FACEBOOK_PAGE_ACCESS_TOKEN
+            "access_token": token
         }
         if caption and caption.strip():
+            data["message"] = caption.strip()
             data["caption"] = caption.strip()
 
         try:
@@ -128,6 +182,7 @@ class FacebookService:
                     "post_url": self._generate_post_url(post_id)
                 }
 
+            self._cached_page_token = None
             error_msg = self._parse_error(result, response.status_code)
             return {"success": False, "error": error_msg}
 

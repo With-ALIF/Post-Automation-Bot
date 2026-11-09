@@ -25,6 +25,9 @@ class Config:
     TELEGRAM_CHANNEL_ID: str = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
     AUTO_POST_TO_CHANNEL: bool = os.getenv("AUTO_POST_TO_CHANNEL", "false").strip().lower() in ("true", "1", "yes")
 
+    ENABLE_TEXT_BACKGROUND: bool = os.getenv("ENABLE_TEXT_BACKGROUND", "true").strip().lower() in ("true", "1", "yes")
+    FB_TEXT_BACKGROUND_PRESET_ID: str = os.getenv("FB_TEXT_BACKGROUND_PRESET_ID", "random").strip()
+
     @classmethod
     def validate(cls) -> list[str]:
         missing = []
@@ -53,5 +56,6 @@ class Config:
             "Facebook Token": cls.mask_token(cls.FACEBOOK_PAGE_ACCESS_TOKEN),
             "Graph API Version": cls.GRAPH_API_VERSION,
             "Telegram Channel ID": cls.TELEGRAM_CHANNEL_ID or "Disabled",
-            "Auto Cross-Post to Channel": "Enabled" if cls.AUTO_POST_TO_CHANNEL else "Disabled"
+            "Auto Cross-Post to Channel": "Enabled" if cls.AUTO_POST_TO_CHANNEL else "Disabled",
+            "Text Post Background": f"Enabled ({cls.FB_TEXT_BACKGROUND_PRESET_ID})" if cls.ENABLE_TEXT_BACKGROUND else "Disabled"
         }

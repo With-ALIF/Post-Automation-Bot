@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import Dict, Any, Optional
 import requests
 from requests.adapters import HTTPAdapter
@@ -8,6 +9,18 @@ from config import Config
 from utils.helpers import sanitize_text
 
 logger = logging.getLogger(__name__)
+
+# Curated Facebook background presets:
+# Black, Solid Red, Sunset Orange, Light Yellow, Indigo/Purple, Deep Blue, Warm Gradient
+PRESET_COLOR_PALETTES = [
+    "1881421442117417",  # Solid Black
+    "1903718606535395",  # Solid Red
+    "901751159967576",   # Sunset Orange
+    "862667370603267",   # Light Yellow
+    "106018623298955",   # Indigo / Purple
+    "319468561816672",   # Deep Indigo / Blue
+    "303063890126415",   # Yellow-Orange Gradient
+]
 
 
 class FacebookService:
@@ -123,16 +136,32 @@ class FacebookService:
         if not text or not text.strip():
             return {"success": False, "error": "পোস্টের জন্য কোনো টেক্সট দেওয়া হয়নি।"}
 
+        clean_text = text.strip()
         token = self.get_effective_page_token()
         url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}/feed"
         payload = {
-            "message": text.strip(),
+            "message": clean_text,
             "access_token": token
         }
+
+        # Apply colored background if enabled and text is within 130 characters limit
+        if Config.ENABLE_TEXT_BACKGROUND and len(clean_text) <= 130:
+            if Config.FB_TEXT_BACKGROUND_PRESET_ID.lower() in ("random", "", "true"):
+                chosen_preset = random.choice(PRESET_COLOR_PALETTES)
+            else:
+                chosen_preset = Config.FB_TEXT_BACKGROUND_PRESET_ID
+            payload["text_format_preset_id"] = chosen_preset
 
         try:
             response = self.session.post(url, data=payload, timeout=20)
             data = response.json()
+
+            # Automatic fallback: if Facebook rejects the preset, retry without preset as plain text
+            if response.status_code != 200 and "text_format_preset_id" in payload:
+                logger.info("Background preset rejected, retrying as standard text post...")
+                payload.pop("text_format_preset_id", None)
+                response = self.session.post(url, data=payload, timeout=20)
+                data = response.json()
 
             if response.status_code == 200 and "id" in data:
                 post_id = data.get("id")

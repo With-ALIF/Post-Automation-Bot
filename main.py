@@ -1,5 +1,8 @@
+import os
 import sys
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -37,6 +40,31 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logger = logging.getLogger("PageBot")
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"Telegram to Facebook Bot is healthy and running!")
+
+    def log_message(self, format, *args):
+        pass
+
+
+def start_health_server():
+    port_str = os.getenv("PORT")
+    if not port_str:
+        return
+    try:
+        port = int(port_str)
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info("Health check server running on port %s", port)
+    except Exception as e:
+        logger.warning("Could not start health check server: %s", e)
+
+
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err_str = sanitize_text(str(context.error))
     logger.error("Exception handled by global error handler: %s", err_str, exc_info=context.error)
@@ -59,6 +87,8 @@ def main() -> None:
         for var in missing_vars:
             logger.error("  - %s", var)
         sys.exit(1)
+
+    start_health_server()
 
     application = (
         Application.builder()

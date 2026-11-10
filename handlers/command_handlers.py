@@ -50,6 +50,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/help` — ব্যবহারের নির্দেশিকা\n"
         "• `/status` — ফেসবুক পেজ ও এপিআই কানেকশন স্ট্যাটাস\n"
         "• `/settings` — বটের বর্তমান কনফিগারেশন বিবরণ\n"
+        "• `/comment <post_id> <মন্তব্য>` — ফেসবুক পোস্টে কমেন্ট করুন\n"
         "• `/cancel` — চলমান যেকোনো ড্রাফট বা ক্যাপশন বাতিল করুন\n\n"
         "⚠️ *নিরাপত্তা:* কেবল অনুমোদিত টেলিগ্রাম ইউজাররাই এই বট ব্যবহার করতে পারবেন।"
     )
@@ -137,3 +138,66 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
+
+
+@authorized_only
+async def comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Format: /comment <post_id> <comment text>
+    Also supports: /coment <post_id> <comment text>
+    """
+    args = context.args
+    if not args or len(args) < 2:
+        usage_text = (
+            "💬 *ফেসবুক পোস্টে মন্তব্য করার নিয়ম (How to Comment):*\n\n"
+            "ফরম্যাট:\n"
+            "`/comment <post_id> <আপনার মন্তব্য>`\n\n"
+            "📌 *উদাহরণ:*\n"
+            "`/comment 646949765165078_123456 দারুণ একটি আপডেট!`\n\n"
+            "_(টিপস: যেকোনো পোস্ট সফল হওয়ার পর যে Post ID টি পান, সেটি এখানে দিন)_"
+        )
+        await update.effective_message.reply_text(
+            text=usage_text,
+            parse_mode="Markdown"
+        )
+        return
+
+    post_id = args[0].strip()
+    comment_text = " ".join(args[1:]).strip()
+
+    status_msg = await update.effective_message.reply_text(
+        f"⏳ *Post ID:* `{post_id}`-এ মন্তব্য পোস্ট করা হচ্ছে...\nঅনুগ্রহ করে অপেক্ষা করুন।",
+        parse_mode="Markdown"
+    )
+
+    result = facebook_service.post_comment(post_id=post_id, message=comment_text)
+
+    if result.get("success"):
+        comment_id = result.get("comment_id", "N/A")
+        post_url = result.get("post_url", f"https://facebook.com/{post_id}")
+        reply_success = (
+            "💬 *ফেসবুক পোস্টে মন্তব্য সফলভাবে প্রকাশিত হয়েছে!* (Comment Added)\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 *Comment ID:* `{comment_id}`\n"
+            f"📌 *Post ID:* `{post_id}`\n"
+            f"🔗 *পোস্ট লিংক:* [Facebook-এ দেখুন]({post_url})\n"
+            f"📝 *মন্তব্য:* {comment_text}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        try:
+            await status_msg.edit_text(text=reply_success, parse_mode="Markdown", disable_web_page_preview=True)
+        except Exception:
+            await status_msg.edit_text(text=reply_success, disable_web_page_preview=True)
+    else:
+        err = result.get("error", "অজানা ত্রুটি")
+        reply_fail = (
+            "❌ *ফেসবুক পোস্টে মন্তব্য প্রকাশ ব্যর্থ হয়েছে!*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ *কারণ:* {err}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "দয়া করে Post ID এবং পেজের পারমিশন সঠিক আছে কি না নিশ্চিত করুন।"
+        )
+        try:
+            await status_msg.edit_text(text=reply_fail, parse_mode="Markdown")
+        except Exception:
+            await status_msg.edit_text(text=reply_fail)

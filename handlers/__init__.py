@@ -4,6 +4,7 @@ from handlers.command_handlers import (
     status_command,
     cancel_command,
     settings_command,
+    comment_command,
 )
 from handlers.menu_handlers import handle_menu_click
 from handlers.post_handlers import (
@@ -18,6 +19,7 @@ __all__ = [
     "status_command",
     "cancel_command",
     "settings_command",
+    "comment_command",
     "handle_menu_click",
     "handle_text_message",
     "handle_photo_message",

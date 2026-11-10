@@ -19,7 +19,8 @@ from handlers.command_handlers import (
     help_command,
     status_command,
     cancel_command,
-    settings_command
+    settings_command,
+    comment_command
 )
 from handlers.menu_handlers import handle_menu_click
 from handlers.post_handlers import (
@@ -102,6 +103,7 @@ def main() -> None:
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CommandHandler(["comment", "coment"], comment_command))
 
     menu_regex = r"^(📝 Create Text Post|🖼 Create Image Post|📊 Publishing Status|⚙️ Settings)$"
     application.add_handler(MessageHandler(filters.Regex(menu_regex), handle_menu_click))

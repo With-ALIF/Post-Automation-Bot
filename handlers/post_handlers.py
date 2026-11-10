@@ -291,11 +291,19 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             post_url = fb_result.get("post_url", f"https://facebook.com/{Config.FACEBOOK_PAGE_ID}")
             timestamp = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
 
+            story_info = ""
+            if post_type == "photo" and fb_result.get("story"):
+                if fb_result["story"].get("success"):
+                    story_info = "📖 *Page Story:* সফলভাবে যুক্ত হয়েছে ✅\n"
+                else:
+                    story_info = "📖 *Page Story:* প্রকাশ হয়নি (মূল পোস্ট অক্ষত) ⚠️\n"
+
             success_text = (
                 "🎉 *ফেসবুক পেজে সফলভাবে পোস্ট প্রকাশিত হয়েছে!* (Published)\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🆔 *Post ID:* `{post_id}`\n"
                 f"🔗 *পোস্ট লিংক:* [Facebook-এ দেখুন]({post_url})\n"
+                f"{story_info}"
                 f"🕒 *সময়:* `{timestamp}`\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 "নতুন পোস্ট তৈরি করতে টেক্সট বা ছবি পাঠান।"

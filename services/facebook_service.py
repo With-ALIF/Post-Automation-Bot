@@ -167,10 +167,23 @@ class FacebookService:
 
             if response.status_code == 200 and "id" in data:
                 post_id = data.get("id")
+
+                # Automatic Page Story publishing for text posts (generates 9:16 vertical card)
+                story_result = None
+                try:
+                    from utils.helpers import create_story_image_from_text
+                    story_image = create_story_image_from_text(clean_text)
+                    if story_image:
+                        logger.info("Generated 9:16 vertical card for text post. Publishing Page Story...")
+                        story_result = self.post_story(photo_bytes=story_image)
+                except Exception as story_err:
+                    print(f"❌ [Facebook Story Text Exception]: {story_err}")
+
                 return {
                     "success": True,
                     "post_id": post_id,
-                    "post_url": self._generate_post_url(post_id)
+                    "post_url": self._generate_post_url(post_id),
+                    "story": story_result
                 }
 
             self._cached_page_token = None
@@ -193,6 +206,8 @@ class FacebookService:
         Uses Page Access Token and executes inside try/except so failures
         do not break the main feed post.
         """
+        import time
+
         if not photo_bytes:
             print("⚠️ [Facebook Story Skipped]: No photo provided. Stories require a photo or video.")
             return {"success": False, "error": "No photo provided"}
@@ -205,15 +220,25 @@ class FacebookService:
         try:
             # Step 1: Upload photo as unpublished (published=false)
             upload_url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}/photos"
+            upload_params = {
+                "published": "false",
+                "access_token": token
+            }
             files = {
                 "source": ("story.jpg", photo_bytes, "image/jpeg")
             }
-            data = {
+            upload_data = {
                 "published": "false",
                 "access_token": token
             }
 
-            upload_response = self.session.post(upload_url, data=data, files=files, timeout=40)
+            upload_response = self.session.post(
+                upload_url,
+                params=upload_params,
+                data=upload_data,
+                files=files,
+                timeout=40
+            )
             upload_result = upload_response.json()
 
             if upload_response.status_code != 200 or "id" not in upload_result:
@@ -225,6 +250,9 @@ class FacebookService:
             photo_id = upload_result.get("id")
             logger.info("Story Step 1 successful: Unpublished photo ID %s", photo_id)
 
+            # Wait 2 seconds for Meta CDN nodes to ingest and index the unpublished asset
+            time.sleep(2)
+
             # Step 2: Publish photo_id to /{page-id}/photo_stories
             story_url = f"{self.base_url}/{Config.FACEBOOK_PAGE_ID}/photo_stories"
             story_payload = {
@@ -234,6 +262,12 @@ class FacebookService:
 
             story_response = self.session.post(story_url, data=story_payload, timeout=30)
             story_result = story_response.json()
+
+            # Retry once if Meta CDN was still indexing
+            if story_response.status_code != 200:
+                time.sleep(2.5)
+                story_response = self.session.post(story_url, data=story_payload, timeout=30)
+                story_result = story_response.json()
 
             if story_response.status_code == 200 and ("id" in story_result or "post_id" in story_result or story_result.get("success")):
                 story_id = story_result.get("id") or story_result.get("post_id") or "success"
@@ -313,49 +347,90 @@ class FacebookService:
                 "error": f"ছবি আপলোড করার সময় নেটওয়ার্ক ত্রুটি ঘটেছে: {sanitize_text(str(e))}"
             }
 
+    @staticmethod
+    def extract_post_id(text: str) -> str:
+        """
+        Extracts a clean Facebook post ID from a raw ID or full Facebook post URL.
+        """
+        if not text:
+            return ""
+        s = text.strip()
+        import re
+        if "facebook.com" in s:
+            m = re.search(r'/posts/(\d+)', s)
+            if m:
+                return m.group(1)
+            m = re.search(r'story_fbid=(\d+)', s)
+            if m:
+                return m.group(1)
+            m = re.search(r'fbid=(\d+)', s)
+            if m:
+                return m.group(1)
+            m = re.search(r'/permalink/(\d+)', s)
+            if m:
+                return m.group(1)
+        return s
+
     def post_comment(self, post_id: str, message: str) -> Dict[str, Any]:
         """
         Publishes a comment on a specific Facebook post using the Page Access Token.
         Endpoint: POST /{post-id}/comments
+        Supports raw post IDs, full URLs, and automatically handles Page ID prefixing.
         """
         if not post_id or not post_id.strip():
             return {"success": False, "error": "পোস্ট আইডি (post_id) দেওয়া হয়নি।"}
 
-        if not message or not message.strip():
+        clean_post_id = self.extract_post_id(post_id.strip())
+        clean_message = message.strip()
+
+        if not clean_message:
             return {"success": False, "error": "মন্তব্যের টেক্সট (comment text) দেওয়া হয়নি।"}
 
-        clean_post_id = post_id.strip()
-        clean_message = message.strip()
-        token = self.get_effective_page_token()
-
-        url = f"{self.base_url}/{clean_post_id}/comments"
-        payload = {
-            "message": clean_message,
-            "access_token": token
-        }
-
-        try:
-            response = self.session.post(url, data=payload, timeout=20)
-            data = response.json()
-
-            if response.status_code == 200 and "id" in data:
-                comment_id = data.get("id")
-                return {
-                    "success": True,
-                    "comment_id": comment_id,
-                    "post_id": clean_post_id,
-                    "post_url": self._generate_post_url(clean_post_id)
-                }
-
-            error_msg = self._parse_error(data, response.status_code)
-            return {"success": False, "error": error_msg}
-
-        except requests.exceptions.RequestException as e:
-            logger.error("Facebook post comment error: %s", sanitize_text(str(e)))
+        # Validate against accidentally providing the Page ID instead of a Post ID
+        if clean_post_id == str(Config.FACEBOOK_PAGE_ID).strip():
             return {
                 "success": False,
-                "error": f"মন্তব্য করার সময় নেটওয়ার্ক ত্রুটি ঘটেছে: {sanitize_text(str(e))}"
+                "error": (
+                    f"⚠️ আপনি পেজ আইডি (`{clean_post_id}`) দিয়েছেন!\n"
+                    "পেজের ওপর সরাসরি মন্তব্য করা যায় না। কমেন্ট করার জন্য নির্দিষ্ট পোস্টের আইডি "
+                    f"(যেমন: `{Config.FACEBOOK_PAGE_ID}_123456789`) অথবা পোস্টের লিংক দিন।"
+                )
             }
+
+        token = self.get_effective_page_token()
+
+        # Candidates to try: clean_post_id and f"{Config.FACEBOOK_PAGE_ID}_{clean_post_id}"
+        target_ids = [clean_post_id]
+        if "_" not in clean_post_id and Config.FACEBOOK_PAGE_ID:
+            target_ids.append(f"{Config.FACEBOOK_PAGE_ID}_{clean_post_id}")
+
+        last_error = None
+        for target_id in target_ids:
+            url = f"{self.base_url}/{target_id}/comments"
+            payload = {
+                "message": clean_message,
+                "access_token": token
+            }
+
+            try:
+                response = self.session.post(url, data=payload, timeout=20)
+                data = response.json()
+
+                if response.status_code == 200 and "id" in data:
+                    comment_id = data.get("id")
+                    return {
+                        "success": True,
+                        "comment_id": comment_id,
+                        "post_id": target_id,
+                        "post_url": self._generate_post_url(target_id)
+                    }
+
+                last_error = self._parse_error(data, response.status_code)
+            except requests.exceptions.RequestException as e:
+                logger.error("Facebook post comment error: %s", sanitize_text(str(e)))
+                last_error = f"মন্তব্য করার সময় নেটওয়ার্ক ত্রুটি ঘটেছে: {sanitize_text(str(e))}"
+
+        return {"success": False, "error": last_error or "কমেন্ট প্রকাশ করা সম্ভব হয়নি।"}
 
     def _generate_post_url(self, post_id: str) -> str:
         if not post_id:

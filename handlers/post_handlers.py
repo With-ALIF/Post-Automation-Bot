@@ -1,7 +1,7 @@
 import uuid
 import logging
 from datetime import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 from config import Config
@@ -54,6 +54,50 @@ async def _safely_edit_message(query, text: str, reply_markup=None):
 @authorized_only
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.effective_message.text.strip()
+
+    # Handle awaiting comment input
+    awaiting_comment_for = context.user_data.get("awaiting_comment_for")
+    if awaiting_comment_for:
+        target_post_id = awaiting_comment_for
+        del context.user_data["awaiting_comment_for"]
+
+        status_msg = await update.effective_message.reply_text(
+            f"⏳ *Post ID:* `{target_post_id}`-এ মন্তব্য প্রকাশ করা হচ্ছে...\nঅনুগ্রহ করে অপেক্ষা করুন।",
+            parse_mode="Markdown"
+        )
+
+        result = facebook_service.post_comment(post_id=target_post_id, message=text)
+
+        if result.get("success"):
+            comment_id = result.get("comment_id", "N/A")
+            post_url = result.get("post_url", f"https://facebook.com/{target_post_id}")
+            reply_success = (
+                "💬 *ফেসবুক পোস্টে মন্তব্য সফলভাবে প্রকাশিত হয়েছে!* (Comment Added)\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 *Comment ID:* `{comment_id}`\n"
+                f"📌 *Post ID:* `{target_post_id}`\n"
+                f"🔗 *পোস্ট লিংক:* [Facebook-এ দেখুন]({post_url})\n"
+                f"📝 *মন্তব্য:*\n{text}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "নতুন পোস্ট তৈরি করতে টেক্সট বা ছবি পাঠান।"
+            )
+            try:
+                await status_msg.edit_text(text=reply_success, parse_mode="Markdown", disable_web_page_preview=True)
+            except Exception:
+                await status_msg.edit_text(text=reply_success, disable_web_page_preview=True)
+        else:
+            err = result.get("error", "অজানা ত্রুটি")
+            reply_fail = (
+                "❌ *ফেসবুক পোস্টে মন্তব্য প্রকাশ ব্যর্থ হয়েছে!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ *কারণ:* {err}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            try:
+                await status_msg.edit_text(text=reply_fail, parse_mode="Markdown")
+            except Exception:
+                await status_msg.edit_text(text=reply_fail)
+        return
 
     awaiting_caption_for = context.user_data.get("awaiting_caption_for")
     if awaiting_caption_for:
@@ -197,6 +241,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
+    if action == "addcomment":
+        context.user_data["awaiting_comment_for"] = draft_id
+        await query.message.reply_text(
+            f"✍️ *Post ID:* `{draft_id}`\n\n"
+            "এই পোস্টে কী মন্তব্য (Comment) করতে চান তা এখন সরাসরি লিখে পাঠান:\n"
+            "_(বাতিল করতে চাইলে /cancel লিখুন)_",
+            parse_mode="Markdown"
+        )
+        return
+
     if not draft:
         await _safely_edit_message(
             query,
@@ -292,7 +346,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             timestamp = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
 
             story_info = ""
-            if post_type == "photo" and fb_result.get("story"):
+            if fb_result.get("story"):
                 if fb_result["story"].get("success"):
                     story_info = "📖 *Page Story:* সফলভাবে যুক্ত হয়েছে ✅\n"
                 else:
@@ -306,10 +360,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"{story_info}"
                 f"🕒 *সময়:* `{timestamp}`\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "নতুন পোস্ট তৈরি করতে টেক্সট বা ছবি পাঠান।"
+                "💬 *মন্তব্য করতে নিচের বাটনে চাপুন অথবা লিখুন:*\n"
+                f"`/comment {post_id} আপনার মন্তব্য`"
             )
 
-            await _safely_edit_message(query, success_text)
+            success_markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("💬 কমেন্ট করুন", callback_data=f"addcomment:{post_id}"),
+                    InlineKeyboardButton("🔗 Facebook-এ দেখুন", url=post_url)
+                ]
+            ])
+
+            await _safely_edit_message(query, success_text, reply_markup=success_markup)
             logger.info("Successfully published post ID %s to Facebook Page", post_id)
 
         else:

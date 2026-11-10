@@ -132,6 +132,9 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "awaiting_image_post" in context.user_data:
         del context.user_data["awaiting_image_post"]
 
+    if "awaiting_comment_for" in context.user_data:
+        del context.user_data["awaiting_comment_for"]
+
     await update.effective_message.reply_text(
         "🚫 *চলমান প্রক্রিয়া বাতিল করা হয়েছে।* (Cancelled)\n\n"
         "নতুন পোস্ট তৈরি করতে টেক্সট বা ছবি পাঠান অথবা নিচের মেনু ব্যবহার করুন।",
@@ -145,16 +148,18 @@ async def comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Format: /comment <post_id> <comment text>
     Also supports: /coment <post_id> <comment text>
+    Preserves multi-line formatting in comment text.
     """
-    args = context.args
-    if not args or len(args) < 2:
+    raw_text = (update.effective_message.text or "").strip()
+    parts = raw_text.split(None, 2)
+    if len(parts) < 3:
         usage_text = (
             "💬 *ফেসবুক পোস্টে মন্তব্য করার নিয়ম (How to Comment):*\n\n"
             "ফরম্যাট:\n"
             "`/comment <post_id> <আপনার মন্তব্য>`\n\n"
             "📌 *উদাহরণ:*\n"
             "`/comment 646949765165078_123456 দারুণ একটি আপডেট!`\n\n"
-            "_(টিপস: যেকোনো পোস্ট সফল হওয়ার পর যে Post ID টি পান, সেটি এখানে দিন)_"
+            "_(টিপস: যেকোনো পোস্ট সফল হওয়ার পর যে Post ID টি পান, সেটি এখানে দিন। লাইন ব্রেক বা এন্টার দিয়ে লিখলেও হুবহু ফরম্যাটিং ঠিক থাকবে।)_"
         )
         await update.effective_message.reply_text(
             text=usage_text,
@@ -162,8 +167,8 @@ async def comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    post_id = args[0].strip()
-    comment_text = " ".join(args[1:]).strip()
+    post_id = parts[1].strip()
+    comment_text = parts[2].strip()
 
     status_msg = await update.effective_message.reply_text(
         f"⏳ *Post ID:* `{post_id}`-এ মন্তব্য পোস্ট করা হচ্ছে...\nঅনুগ্রহ করে অপেক্ষা করুন।",
@@ -174,14 +179,15 @@ async def comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if result.get("success"):
         comment_id = result.get("comment_id", "N/A")
-        post_url = result.get("post_url", f"https://facebook.com/{post_id}")
+        actual_post_id = result.get("post_id", post_id)
+        post_url = result.get("post_url", f"https://facebook.com/{actual_post_id}")
         reply_success = (
             "💬 *ফেসবুক পোস্টে মন্তব্য সফলভাবে প্রকাশিত হয়েছে!* (Comment Added)\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🆔 *Comment ID:* `{comment_id}`\n"
-            f"📌 *Post ID:* `{post_id}`\n"
+            f"📌 *Post ID:* `{actual_post_id}`\n"
             f"🔗 *পোস্ট লিংক:* [Facebook-এ দেখুন]({post_url})\n"
-            f"📝 *মন্তব্য:* {comment_text}\n"
+            f"📝 *মন্তব্য:*\n{comment_text}\n"
             "━━━━━━━━━━━━━━━━━━━━━━"
         )
         try:

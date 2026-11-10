@@ -94,3 +94,56 @@ def get_preview_keyboard(draft_id: str, is_image: bool = False, has_caption: boo
 
 def compute_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+
+
+def create_story_image_from_text(text: str) -> Optional[bytes]:
+    """
+    Renders text into a 1080x1920 (9:16 vertical ratio) JPEG image
+    suitable for publishing as a Facebook Page Story.
+    """
+    if not text:
+        return None
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import io
+        import textwrap
+
+        width, height = 1080, 1920
+        bg_color = (15, 23, 42)
+        img = Image.new("RGB", (width, height), color=bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Draw decorative card border
+        draw.rectangle([40, 40, width - 40, height - 40], outline=(56, 189, 248), width=5)
+
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 52)
+            font_body = ImageFont.truetype("arial.ttf", 60)
+            font_footer = ImageFont.truetype("arial.ttf", 38)
+        except Exception:
+            font_title = ImageFont.load_default()
+            font_body = ImageFont.load_default()
+            font_footer = ImageFont.load_default()
+
+        # Wrap text lines
+        lines = []
+        for line in text.split("\n"):
+            wrapped = textwrap.wrap(line, width=28)
+            if wrapped:
+                lines.extend(wrapped)
+            else:
+                lines.append("")
+
+        display_text = "\n".join(lines[:16])
+
+        # Draw header, body text, and footer
+        draw.text((width // 2, 220), "📢 SOT Admission News", font=font_title, fill=(56, 189, 248), anchor="mm")
+        draw.multiline_text((width // 2, height // 2), display_text, font=font_body, fill=(255, 255, 255), anchor="mm", align="center", spacing=24)
+        draw.text((width // 2, height - 180), "facebook.com/" + (Config.FACEBOOK_PAGE_ID or "page"), font=font_footer, fill=(148, 163, 184), anchor="mm")
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+    except Exception:
+        return None

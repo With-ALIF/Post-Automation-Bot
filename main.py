@@ -42,11 +42,20 @@ logger = logging.getLogger("PageBot")
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
         self.wfile.write(b"Telegram to Facebook Bot is healthy and running!")
+
+    def do_POST(self):
+        self.send_response(200)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass
